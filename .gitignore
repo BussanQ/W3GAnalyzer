@@ -1,0 +1,13 @@
+# 构建输出
+bin/
+obj/
+dist/
+
+# Visual Studio / Rider 用户文件
+*.user
+*.suo
+.vs/
+.idea/
+
+# 本地工具配置
+.claude/
