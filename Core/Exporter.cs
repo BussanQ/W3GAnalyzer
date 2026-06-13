@@ -30,7 +30,7 @@ public static class Exporter
                 durationMs = s.DurationMs,
                 duration = s.DurationText,
             },
-            map = new { path = s.MapPath, name = s.MapName },
+            map = new { path = s.MapPath, name = s.MapName, checksum = $"0x{s.MapChecksum:X8}" },
             gameName = s.GameName,
             gameCreator = s.GameCreator,
             host = s.HostName,

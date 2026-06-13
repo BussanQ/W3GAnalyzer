@@ -24,6 +24,13 @@ internal static class Program
             return RunCli(args);
         }
 
+        // CLI 模式：--map <replay.w3g> <map.w3x>
+        if (args.Length >= 1 && args[0].Equals("--map", StringComparison.OrdinalIgnoreCase))
+        {
+            AttachConsole(ATTACH_PARENT_PROCESS);
+            return RunMapCompare(args);
+        }
+
         ApplicationConfiguration.Initialize();
         string? initial = args.Length >= 1 && File.Exists(args[0]) ? args[0] : null;
         Application.Run(new MainForm(initial));
@@ -67,6 +74,39 @@ internal static class Program
         catch (Exception ex)
         {
             Console.Error.WriteLine($"FAIL  {input}  :  {ex.Message}");
+            return 1;
+        }
+    }
+
+    private static int RunMapCompare(string[] args)
+    {
+        if (args.Length < 3)
+        {
+            Console.Error.WriteLine("用法: W3GAnalyzer --map <replay.w3g> <map.w3x>");
+            return 2;
+        }
+        if (!File.Exists(args[1])) { Console.Error.WriteLine($"录像不存在: {args[1]}"); return 2; }
+        if (!File.Exists(args[2])) { Console.Error.WriteLine($"地图不存在: {args[2]}"); return 2; }
+
+        try
+        {
+            var replay = ReplayParser.Parse(args[1]);
+            var r = MapFingerprint.Compare(replay, args[2]);
+            Console.WriteLine($"录像地图   : {r.ReplayMapName}  ({r.ReplayMapPath})");
+            Console.WriteLine($"录像校验和 : 0x{r.ReplayChecksum:X8}");
+            Console.WriteLine($"拖入地图   : {r.DraggedPath}");
+            Console.WriteLine($"  大小     : {r.DraggedSize:N0}  SHA256 {r.DraggedSha}");
+            Console.WriteLine($"  文件名匹配: {(r.NameMatch ? "是" : "否")}");
+            if (r.ReferencePath != null)
+                Console.WriteLine($"参照地图   : {r.ReferencePath}\n  大小 {r.ReferenceSize:N0}  SHA256 {r.ReferenceSha}");
+            else
+                Console.WriteLine("参照地图   : (本机未定位到)");
+            Console.WriteLine($"结论       : {r.Verdict}");
+            return r.FingerprintMatch == false ? 1 : 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"FAIL  :  {ex.Message}");
             return 1;
         }
     }

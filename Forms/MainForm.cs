@@ -10,10 +10,14 @@ public sealed class MainForm : Form
     private readonly DataGridView _players = new();
     private readonly DataGridView _chat = new();
     private readonly ListView _timeline = new();
+    private readonly TextBox _mapCompare = new();
     private readonly StatusStrip _status = new();
     private readonly ToolStripStatusLabel _statusLabel = new();
     private readonly ToolStripMenuItem _exportJson = new("导出 JSON(&J)");
     private readonly ToolStripMenuItem _exportText = new("导出文本(&T)");
+    private readonly ToolStripMenuItem _compareMap = new("对比地图(&M)...");
+    private TabControl _tabs = null!;
+    private TabPage _tabMapCompare = null!;
 
     private ReplaySummary? _current;
 
@@ -48,11 +52,13 @@ public sealed class MainForm : Form
         _exportJson.Click += (_, _) => Export(json: true);
         _exportText.Enabled = false;
         _exportText.Click += (_, _) => Export(json: false);
+        _compareMap.Enabled = false;
+        _compareMap.Click += (_, _) => ChooseAndCompareMap();
         var exit = new ToolStripMenuItem("退出(&X)", null, (_, _) => Close());
 
         file.DropDownItems.AddRange(new ToolStripItem[]
         {
-            open, new ToolStripSeparator(), _exportJson, _exportText,
+            open, _compareMap, new ToolStripSeparator(), _exportJson, _exportText,
             new ToolStripSeparator(), exit,
         });
 
@@ -62,7 +68,8 @@ public sealed class MainForm : Form
                 "魔兽争霸 III 录像 (.w3g) 分析器\n" +
                 "支持经典版 1.07–1.27 录像\n" +
                 "可解析：版本、地图、玩家、聊天、APM、离开事件、时间线\n" +
-                "支持拖放打开，可导出 JSON / 文本",
+                "支持拖放打开，可导出 JSON / 文本\n" +
+                "加载录像后拖入 .w3x 地图可对比是否一致（按文件 SHA-256 指纹）",
                 "关于", MessageBoxButtons.OK, MessageBoxIcon.Information)));
 
         menu.Items.Add(file);
@@ -74,6 +81,7 @@ public sealed class MainForm : Form
     private void BuildTabs()
     {
         var tabs = new TabControl { Dock = DockStyle.Fill };
+        _tabs = tabs;
 
         // 概览
         _overview.Multiline = true;
@@ -107,7 +115,20 @@ public sealed class MainForm : Form
         var tabTimeline = new TabPage("时间线");
         tabTimeline.Controls.Add(_timeline);
 
-        tabs.TabPages.AddRange(new[] { tabOverview, tabPlayers, tabChat, tabTimeline });
+        // 地图对比
+        _mapCompare.Multiline = true;
+        _mapCompare.ReadOnly = true;
+        _mapCompare.ScrollBars = ScrollBars.Both;
+        _mapCompare.WordWrap = false;
+        _mapCompare.Dock = DockStyle.Fill;
+        _mapCompare.Font = new Font("Consolas", 10f);
+        _mapCompare.BackColor = Color.White;
+        _mapCompare.Text = "先加载一个录像，然后把地图文件 (*.w3x/*.w3m) 拖到本窗口，\r\n"
+                         + "或用「文件 → 对比地图」选择地图，校验它是否与录像所用地图一致。";
+        _tabMapCompare = new TabPage("地图对比");
+        _tabMapCompare.Controls.Add(_mapCompare);
+
+        tabs.TabPages.AddRange(new[] { tabOverview, tabPlayers, tabChat, tabTimeline, _tabMapCompare });
         Controls.Add(tabs);
         tabs.BringToFront();
     }
@@ -152,8 +173,76 @@ public sealed class MainForm : Form
 
     private void OnDragDrop(object? sender, DragEventArgs e)
     {
-        if (e.Data?.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0)
-            LoadFile(files[0]);
+        if (e.Data?.GetData(DataFormats.FileDrop) is not string[] files || files.Length == 0)
+            return;
+        string path = files[0];
+        string ext = Path.GetExtension(path).ToLowerInvariant();
+        if (ext is ".w3x" or ".w3m")
+            CompareMap(path);
+        else
+            LoadFile(path);
+    }
+
+    private void ChooseAndCompareMap()
+    {
+        using var dlg = new OpenFileDialog
+        {
+            Filter = "魔兽争霸III地图 (*.w3x;*.w3m)|*.w3x;*.w3m|所有文件 (*.*)|*.*",
+            Title = "选择要对比的地图文件",
+        };
+        if (dlg.ShowDialog(this) == DialogResult.OK)
+            CompareMap(dlg.FileName);
+    }
+
+    private void CompareMap(string mapPath)
+    {
+        if (_current == null)
+        {
+            MessageBox.Show(this, "请先加载一个录像文件，再拖入地图对比。", "提示",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        try
+        {
+            var r = MapFingerprint.Compare(_current, mapPath);
+            var sb = new StringBuilder();
+            sb.AppendLine("══════════ 地图对比 ══════════");
+            sb.AppendLine();
+            sb.AppendLine($"【结论】{r.Verdict}");
+            sb.AppendLine();
+            sb.AppendLine("── 录像所用地图 ──");
+            sb.AppendLine($"  地图名      : {r.ReplayMapName}");
+            sb.AppendLine($"  相对路径    : {r.ReplayMapPath}");
+            sb.AppendLine($"  录像内校验和: 0x{r.ReplayChecksum:X8}  （含 common.j/blizzard.j，跨补丁不可复现，仅供参考）");
+            sb.AppendLine();
+            sb.AppendLine("── 拖入的地图 ──");
+            sb.AppendLine($"  文件        : {r.DraggedPath}");
+            sb.AppendLine($"  大小        : {r.DraggedSize:N0} 字节");
+            sb.AppendLine($"  SHA-256     : {r.DraggedSha}");
+            sb.AppendLine($"  文件名匹配  : {(r.NameMatch ? "是" : "否")}");
+            sb.AppendLine();
+            if (r.ReferencePath != null)
+            {
+                sb.AppendLine("── 本机定位到的参照地图（录像路径）──");
+                sb.AppendLine($"  文件        : {r.ReferencePath}");
+                sb.AppendLine($"  大小        : {r.ReferenceSize:N0} 字节");
+                sb.AppendLine($"  SHA-256     : {r.ReferenceSha}");
+                sb.AppendLine($"  内容一致    : {(r.FingerprintMatch == true ? "是（完全相同）" : "否（同名不同内容）")}");
+            }
+            else
+            {
+                sb.AppendLine("── 参照地图 ──");
+                sb.AppendLine("  未能在录像路径对应位置定位到本机地图文件，只能做文件名级别比对。");
+            }
+            _mapCompare.Text = sb.ToString().Replace("\n", "\r\n");
+            _tabs.SelectedTab = _tabMapCompare;
+            _statusLabel.Text = $"地图对比：{Path.GetFileName(mapPath)} — {r.Verdict}";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "地图对比失败",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     private void LoadFile(string path)
@@ -166,6 +255,7 @@ public sealed class MainForm : Form
             Populate(_current);
             _exportJson.Enabled = true;
             _exportText.Enabled = true;
+            _compareMap.Enabled = true;
             _statusLabel.Text = $"{Path.GetFileName(path)} · 解析 {sw.ElapsedMilliseconds} ms · " +
                                 $"警告 {_current.Warnings.Count}";
             Text = $"{Path.GetFileName(path)} - 魔兽争霸 III 录像分析器";
@@ -188,6 +278,7 @@ public sealed class MainForm : Form
         sb.AppendLine($"标识      : {s.Header.GameIdentifier}  flags=0x{s.Header.Flags:X4}");
         sb.AppendLine($"地图      : {s.MapName}");
         sb.AppendLine($"地图路径  : {s.MapPath}");
+        sb.AppendLine($"地图校验和: 0x{s.MapChecksum:X8}");
         sb.AppendLine($"游戏名    : {s.GameName}");
         sb.AppendLine($"主机      : {s.HostName}");
         sb.AppendLine($"创建者    : {s.GameCreator}");

@@ -156,6 +156,7 @@ public sealed class ReplaySummary
     public string GameName { get; set; } = "";
     public string MapPath { get; set; } = "";
     public string MapName { get; set; } = "";
+    public uint MapChecksum { get; set; }     // 录像内存储的地图校验和（含 common.j/blizzard.j，跨补丁不可复现）
     public string GameCreator { get; set; } = "";
     public string HostName { get; set; } = "";
 

@@ -232,7 +232,8 @@ public sealed class ReplayParser
             s.RandomHero = (shared & 0x02) != 0;
             s.RandomRaces = (shared & 0x04) != 0;
 
-            r.Skip(9);                       // 4 未知 + 1 未知 + 4 地图校验和
+            r.Skip(5);                       // 0x04-0x08：未知（5 字节）
+            result.MapChecksum = r.ReadUInt32(); // 0x09-0x0C：地图校验和（4 字节）
             result.MapPath = r.ReadCString();
             result.MapName = Lookups.MapNameFromPath(result.MapPath);
             result.GameCreator = r.ReadCString();
