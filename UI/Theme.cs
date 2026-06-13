@@ -3,27 +3,26 @@ using System.Drawing.Text;
 
 namespace W3GAnalyzer.UI;
 
-/// <summary>暗色「科技感」主题：调色板 + 字体解析 + 控件样式助手 + 暗色 ToolStrip 渲染器。</summary>
+/// <summary>暗色分析工具主题：调色板、字体解析、控件样式助手和 ToolStrip 渲染器。</summary>
 internal static class Theme
 {
-    // ── 背景层次（由深到浅）──
-    public static readonly Color Bg = Color.FromArgb(13, 17, 23);          // #0D1117 最底
-    public static readonly Color Surface = Color.FromArgb(22, 27, 34);     // #161B22 面板/标题栏
-    public static readonly Color SurfaceAlt = Color.FromArgb(28, 33, 41);  // #1C2129 输入框/交替行
-    public static readonly Color Border = Color.FromArgb(48, 54, 61);      // #30363D 边框
-    public static readonly Color BorderSubtle = Color.FromArgb(33, 38, 45);
+    public static readonly Color Bg = Color.FromArgb(10, 13, 18);
+    public static readonly Color Surface = Color.FromArgb(24, 29, 38);
+    public static readonly Color SurfaceAlt = Color.FromArgb(31, 37, 48);
+    public static readonly Color SurfaceLift = Color.FromArgb(38, 45, 58);
+    public static readonly Color Border = Color.FromArgb(58, 66, 80);
+    public static readonly Color BorderSubtle = Color.FromArgb(42, 49, 62);
 
-    // ── 文本 ──
-    public static readonly Color Text = Color.FromArgb(230, 237, 243);     // #E6EDF3
-    public static readonly Color TextMuted = Color.FromArgb(139, 148, 158);// #8B949E
+    public static readonly Color Text = Color.FromArgb(238, 242, 247);
+    public static readonly Color TextMuted = Color.FromArgb(151, 163, 179);
 
-    // ── 强调色（青蓝科技）──
-    public static readonly Color Accent = Color.FromArgb(45, 212, 255);    // 霓虹青
-    public static readonly Color AccentDim = Color.FromArgb(0, 120, 160);
-    public static readonly Color AccentGlow = Color.FromArgb(24, 48, 60);  // 选中行/悬停底色
-    public static readonly Color Good = Color.FromArgb(63, 185, 80);       // 绿
-    public static readonly Color Bad = Color.FromArgb(248, 81, 73);        // 红
-    public static readonly Color Warn = Color.FromArgb(210, 153, 34);      // 黄
+    public static readonly Color Accent = Color.FromArgb(90, 184, 255);
+    public static readonly Color AccentDim = Color.FromArgb(24, 98, 138);
+    public static readonly Color AccentSoft = Color.FromArgb(32, 65, 92);
+    public static readonly Color Amber = Color.FromArgb(247, 181, 78);
+    public static readonly Color Good = Color.FromArgb(71, 191, 121);
+    public static readonly Color Bad = Color.FromArgb(239, 91, 88);
+    public static readonly Color Warn = Color.FromArgb(229, 170, 73);
 
     private static readonly HashSet<string> Installed =
         new InstalledFontCollection().Families.Select(f => f.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -44,14 +43,14 @@ internal static class Theme
     public static void StyleGrid(DataGridView g)
     {
         g.EnableHeadersVisualStyles = false;
-        g.BackgroundColor = Theme.Bg;
+        g.BackgroundColor = Bg;
         g.GridColor = Theme.BorderSubtle;
         g.BorderStyle = BorderStyle.None;
         g.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
         g.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
         g.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-        g.ColumnHeadersHeight = 38;
-        g.RowTemplate.Height = 30;
+        g.ColumnHeadersHeight = 42;
+        g.RowTemplate.Height = 34;
         g.RowHeadersVisible = false;
         g.AllowUserToAddRows = false;
         g.AllowUserToDeleteRows = false;
@@ -60,30 +59,33 @@ internal static class Theme
         g.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
         g.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
         g.MultiSelect = false;
+        g.Dock = DockStyle.Fill;
+        g.Margin = Padding.Empty;
+        g.BackgroundColor = Surface;
 
         var head = g.ColumnHeadersDefaultCellStyle;
-        head.BackColor = Theme.Surface;
-        head.ForeColor = Theme.Accent;
-        head.SelectionBackColor = Theme.Surface;
-        head.SelectionForeColor = Theme.Accent;
+        head.BackColor = SurfaceAlt;
+        head.ForeColor = Text;
+        head.SelectionBackColor = SurfaceAlt;
+        head.SelectionForeColor = Text;
         head.Font = Ui(9.5f, FontStyle.Bold);
         head.Alignment = DataGridViewContentAlignment.MiddleLeft;
-        head.Padding = new Padding(10, 0, 0, 0);
+        head.Padding = new Padding(12, 0, 0, 0);
 
         var cell = g.DefaultCellStyle;
-        cell.BackColor = Theme.Surface;
-        cell.ForeColor = Theme.Text;
-        cell.SelectionBackColor = Theme.AccentGlow;
-        cell.SelectionForeColor = Theme.Accent;
+        cell.BackColor = Surface;
+        cell.ForeColor = Text;
+        cell.SelectionBackColor = AccentSoft;
+        cell.SelectionForeColor = Text;
         cell.Font = Ui(9.5f);
-        cell.Padding = new Padding(10, 0, 0, 0);
+        cell.Padding = new Padding(12, 0, 8, 0);
 
         var alt = g.AlternatingRowsDefaultCellStyle;
-        alt.BackColor = Theme.SurfaceAlt;
-        alt.ForeColor = Theme.Text;
-        alt.SelectionBackColor = Theme.AccentGlow;
-        alt.SelectionForeColor = Theme.Accent;
-        alt.Padding = new Padding(10, 0, 0, 0);
+        alt.BackColor = SurfaceAlt;
+        alt.ForeColor = Text;
+        alt.SelectionBackColor = AccentSoft;
+        alt.SelectionForeColor = Text;
+        alt.Padding = new Padding(12, 0, 8, 0);
     }
 
     public static void StyleReadout(RichTextBox rt)
@@ -91,12 +93,13 @@ internal static class Theme
         rt.Dock = DockStyle.Fill;
         rt.ReadOnly = true;
         rt.BorderStyle = BorderStyle.None;
-        rt.BackColor = Theme.Surface;
-        rt.ForeColor = Theme.Text;
+        rt.BackColor = Surface;
+        rt.ForeColor = Text;
         rt.Font = Mono(10.5f);
         rt.WordWrap = false;
         rt.ScrollBars = RichTextBoxScrollBars.Both;
         rt.DetectUrls = false;
+        rt.Margin = Padding.Empty;
     }
 
     /// <summary>画一个圆角矩形路径。</summary>
@@ -119,14 +122,20 @@ internal class DBPanel : Panel
     public DBPanel() { DoubleBuffered = true; ResizeRedraw = true; }
 }
 
-/// <summary>顶部导航的扁平标签按钮，激活时显示青色下划线指示条。</summary>
+/// <summary>顶部导航按钮，激活时使用柔和填充和短强调线。</summary>
 internal sealed class NavButton : Button
 {
     private bool _active;
     public bool Active
     {
         get => _active;
-        set { _active = value; Invalidate(); }
+        set
+        {
+            _active = value;
+            ForeColor = _active ? Theme.Accent : Theme.TextMuted;
+            BackColor = _active ? Theme.AccentSoft : Theme.Surface;
+            Invalidate();
+        }
     }
 
     public NavButton(string text)
@@ -134,30 +143,29 @@ internal sealed class NavButton : Button
         Text = text;
         FlatStyle = FlatStyle.Flat;
         FlatAppearance.BorderSize = 0;
-        FlatAppearance.MouseOverBackColor = Theme.SurfaceAlt;
-        FlatAppearance.MouseDownBackColor = Theme.SurfaceAlt;
+        FlatAppearance.MouseOverBackColor = Theme.SurfaceLift;
+        FlatAppearance.MouseDownBackColor = Theme.AccentSoft;
         BackColor = Theme.Surface;
         ForeColor = Theme.TextMuted;
-        Font = Theme.Ui(10.5f);
+        Font = Theme.Ui(10f, FontStyle.Bold);
         AutoSize = false;
-        Height = 44;
-        Margin = new Padding(2, 0, 2, 0);
+        Height = 40;
+        Margin = new Padding(4, 6, 4, 6);
         Cursor = Cursors.Hand;
         TabStop = false;
         int w = TextRenderer.MeasureText(text, Font).Width;
-        Width = Math.Max(80, w + 30);
+        Width = Math.Max(84, w + 34);
     }
 
     protected override void OnPaint(PaintEventArgs e)
     {
-        ForeColor = _active ? Theme.Accent : Theme.TextMuted;
         base.OnPaint(e);
         if (_active)
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using var pen = new Pen(Theme.Accent, 2.5f);
-            int y = Height - 3;
-            e.Graphics.DrawLine(pen, 14, y, Width - 14, y);
+            using var pen = new Pen(Theme.Accent, 3f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            int y = Height - 5;
+            e.Graphics.DrawLine(pen, 18, y, Width - 18, y);
         }
     }
 }
@@ -177,9 +185,9 @@ internal sealed class DarkColorTable : ProfessionalColorTable
     public override Color StatusStripGradientBegin => Theme.Surface;
     public override Color StatusStripGradientEnd => Theme.Surface;
 
-    public override Color MenuItemSelected => Theme.AccentGlow;
-    public override Color MenuItemSelectedGradientBegin => Theme.AccentGlow;
-    public override Color MenuItemSelectedGradientEnd => Theme.AccentGlow;
+    public override Color MenuItemSelected => Theme.AccentSoft;
+    public override Color MenuItemSelectedGradientBegin => Theme.AccentSoft;
+    public override Color MenuItemSelectedGradientEnd => Theme.AccentSoft;
     public override Color MenuItemPressedGradientBegin => Theme.SurfaceAlt;
     public override Color MenuItemPressedGradientMiddle => Theme.SurfaceAlt;
     public override Color MenuItemPressedGradientEnd => Theme.SurfaceAlt;

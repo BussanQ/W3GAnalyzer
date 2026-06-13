@@ -34,9 +34,9 @@ public sealed class MainForm : Form
     public MainForm(string? initialFile = null)
     {
         Text = "魔兽争霸 III 录像分析器";
-        Width = 1040;
-        Height = 720;
-        MinimumSize = new Size(820, 560);
+        Width = 1180;
+        Height = 760;
+        MinimumSize = new Size(900, 600);
         StartPosition = FormStartPosition.CenterScreen;
         Font = Theme.Ui(9f);
         BackColor = Theme.Bg;
@@ -58,10 +58,10 @@ public sealed class MainForm : Form
             RowCount = 4,
             BackColor = Theme.Bg,
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 66)); // header
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 46)); // nav
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 86)); // header
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 54)); // nav
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // content
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 26)); // status
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 30)); // status
 
         root.Controls.Add(BuildHeader(), 0, 0);
         root.Controls.Add(BuildNav(), 0, 1);
@@ -160,38 +160,60 @@ public sealed class MainForm : Form
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-            // 徽标方块
-            var logo = new Rectangle(18, 16, 34, 34);
+            var bg = new Rectangle(0, 0, header.Width, header.Height);
+            using (var grad = new LinearGradientBrush(bg, Theme.SurfaceLift, Theme.Surface, 0f))
+                g.FillRectangle(grad, bg);
+
+            var logo = new Rectangle(22, 20, 46, 46);
             using (var path = Theme.RoundRect(logo, 8))
-            using (var grad = new LinearGradientBrush(logo, Theme.Accent, Theme.AccentDim, 60f))
+            using (var grad = new LinearGradientBrush(logo, Theme.Accent, Theme.Amber, 45f))
                 g.FillPath(grad, path);
-            using (var lf = Theme.Ui(13f, FontStyle.Bold))
+            using (var lf = Theme.Ui(15f, FontStyle.Bold))
             {
                 var sz = g.MeasureString("W3", lf);
-                g.DrawString("W3", lf, Brushes.Black,
+                using var b = new SolidBrush(Color.FromArgb(14, 18, 24));
+                g.DrawString("W3", lf, b,
                     logo.Left + (logo.Width - sz.Width) / 2, logo.Top + (logo.Height - sz.Height) / 2);
             }
 
-            // 字标
-            using (var wf = Theme.Ui(15f, FontStyle.Bold))
+            using (var wf = Theme.Ui(18f, FontStyle.Bold))
             using (var b = new SolidBrush(Theme.Text))
-                g.DrawString("W3G ANALYZER", wf, b, 64, 10);
-            using (var sf = Theme.Ui(8.5f))
+                g.DrawString("W3G Analyzer", wf, b, 84, 17);
+            using (var sf = Theme.Ui(9.5f))
             using (var b = new SolidBrush(Theme.TextMuted))
-                g.DrawString("魔兽争霸 III 录像解析 · 地图指纹比对", sf, b, 66, 36);
+                g.DrawString("魔兽争霸 III 录像解析、玩家统计、聊天记录与地图指纹比对", sf, b, 86, 47);
 
-            // 底部强调线：青色渐隐
+            string hint = "拖放 .w3g 录像或 .w3x/.w3m 地图";
+            using (var hf = Theme.Ui(9f, FontStyle.Bold))
+            {
+                var sz = g.MeasureString(hint, hf);
+                var pill = new Rectangle(
+                    Math.Max(20, header.Width - (int)sz.Width - 42),
+                    27,
+                    (int)sz.Width + 24,
+                    32);
+                using (var path = Theme.RoundRect(pill, 8))
+                using (var fill = new SolidBrush(Theme.Bg))
+                using (var pen = new Pen(Theme.BorderSubtle))
+                {
+                    g.FillPath(fill, path);
+                    g.DrawPath(pen, path);
+                }
+                using var hb = new SolidBrush(Theme.TextMuted);
+                g.DrawString(hint, hf, hb, pill.Left + 12, pill.Top + 7);
+            }
+
             int y = header.Height - 1;
             using (var p = new Pen(Theme.Border)) g.DrawLine(p, 0, y, header.Width, y);
             using (var grad = new LinearGradientBrush(
-                new Rectangle(0, y - 1, Math.Max(1, header.Width), 2), Theme.Accent, Theme.Surface, 0f))
+                new Rectangle(22, y - 2, Math.Max(1, header.Width - 44), 2), Theme.Accent, Theme.Amber, 0f))
             using (var p = new Pen(grad, 2f))
-                g.DrawLine(p, 0, y, header.Width * 2 / 3, y);
+                g.DrawLine(p, 22, y, Math.Min(header.Width - 22, 430), y);
         };
         return header;
     }
 
-    // ── 扁平导航标签 ──
+    // ── 导航标签 ──
     private DBPanel BuildNav()
     {
         var bar = new DBPanel { Dock = DockStyle.Fill, BackColor = Theme.Surface };
@@ -199,7 +221,7 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             BackColor = Theme.Surface,
-            Padding = new Padding(10, 1, 0, 0),
+            Padding = new Padding(16, 0, 0, 0),
             WrapContents = false,
         };
         for (int i = 0; i < _navs.Length; i++)
@@ -225,7 +247,12 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             BackColor = Theme.Bg,
-            Padding = new Padding(14, 12, 14, 12),
+            Padding = new Padding(18, 16, 18, 16),
+        };
+        host.Paint += (_, e) =>
+        {
+            using var pen = new Pen(Theme.BorderSubtle);
+            e.Graphics.DrawRectangle(pen, 17, 15, Math.Max(1, host.Width - 35), Math.Max(1, host.Height - 33));
         };
 
         Theme.StyleReadout(_overview);
@@ -241,6 +268,7 @@ public sealed class MainForm : Form
         {
             v.Dock = DockStyle.Fill;
             v.Visible = false;
+            v.BackColor = Theme.Surface;
             host.Controls.Add(v);
         }
         return host;
@@ -259,6 +287,7 @@ public sealed class MainForm : Form
         _status.BackColor = Theme.Surface;
         _status.Dock = DockStyle.Fill;
         _status.SizingGrip = false;
+        _status.Padding = new Padding(12, 3, 0, 0);
         _status.Items.Add(_statusDot);
         _status.Items.Add(_statusLabel);
         return _status;
@@ -409,6 +438,14 @@ public sealed class MainForm : Form
     {
         // ── 概览 ──
         _overview.Clear();
+        OverviewTitle(_overview, s);
+        Section(_overview, "关键指标");
+        Kv(_overview, "时长", s.DurationText, Theme.Accent);
+        Kv(_overview, "玩家", $"{s.Players.Count} 名");
+        Kv(_overview, "聊天", $"{s.Chat.Count} 条");
+        Kv(_overview, "时间线", $"{s.Timeline.Count} 条事件");
+        Kv(_overview, "警告", $"{s.Warnings.Count} 条", s.Warnings.Count > 0 ? Theme.Warn : Theme.Good);
+
         Section(_overview, "录像");
         Kv(_overview, "文件", s.FilePath);
         Kv(_overview, "游戏版本", s.Header.VersionDisplay, Theme.Accent);
@@ -490,38 +527,47 @@ public sealed class MainForm : Form
     {
         _overview.Clear();
         _overview.SelectionColor = Theme.TextMuted;
-        _overview.SelectionFont = Theme.Mono(10.5f);
-        _overview.AppendText("\n\n");
+        _overview.SelectionFont = Theme.Ui(10f);
+        _overview.AppendText("\n\n\n");
         _overview.SelectionColor = Theme.Accent;
-        _overview.SelectionFont = Theme.Mono(12f, FontStyle.Bold);
-        _overview.AppendText("   ▎尚未载入录像\n\n");
+        _overview.SelectionFont = Theme.Ui(18f, FontStyle.Bold);
+        _overview.AppendText("   尚未载入录像\n\n");
         _overview.SelectionColor = Theme.TextMuted;
-        _overview.SelectionFont = Theme.Mono(10.5f);
+        _overview.SelectionFont = Theme.Ui(10.5f);
         _overview.AppendText(
-            "   · 把 .w3g 录像文件拖入本窗口，或用「文件 → 打开录像」\n" +
-            "   · 载入后可在上方标签查看玩家 / 聊天 / 时间线\n" +
-            "   · 再拖入 .w3x 地图，可按 SHA-256 指纹校验是否与录像一致\n");
+            "   把 .w3g 录像文件拖入本窗口，或用「文件 → 打开录像」。\n" +
+            "   载入后可在上方标签查看玩家、聊天、时间线，并可继续拖入地图做 SHA-256 指纹比对。\n");
 
         _mapCompare.Clear();
         _mapCompare.SelectionColor = Theme.TextMuted;
-        _mapCompare.SelectionFont = Theme.Mono(10.5f);
+        _mapCompare.SelectionFont = Theme.Ui(10.5f);
         _mapCompare.AppendText(
             "\n   先加载一个录像，然后把地图文件 (*.w3x/*.w3m) 拖到本窗口，\n" +
             "   或用「文件 → 对比地图」选择地图，校验它是否与录像所用地图一致。\n");
     }
 
     // ── RichTextBox 着色助手 ──
+    private static void OverviewTitle(RichTextBox rt, ReplaySummary s)
+    {
+        rt.SelectionColor = Theme.Text;
+        rt.SelectionFont = Theme.Ui(16f, FontStyle.Bold);
+        rt.AppendText("  " + (string.IsNullOrWhiteSpace(s.GameName) ? "已载入录像" : s.GameName) + "\n");
+        rt.SelectionColor = Theme.TextMuted;
+        rt.SelectionFont = Theme.Ui(9.5f);
+        rt.AppendText($"  {Path.GetFileName(s.FilePath)}  ·  {s.Header.VersionDisplay}  ·  {s.MapName}\n");
+    }
+
     private static void Section(RichTextBox rt, string title)
     {
-        rt.SelectionColor = Theme.Accent;
-        rt.SelectionFont = Theme.Mono(10.5f, FontStyle.Bold);
-        rt.AppendText("\n  ▎" + title + "\n");
+        rt.SelectionColor = Theme.Amber;
+        rt.SelectionFont = Theme.Ui(10.5f, FontStyle.Bold);
+        rt.AppendText("\n  " + title + "\n");
     }
 
     private static void Kv(RichTextBox rt, string key, string value, Color? valueColor = null)
     {
         rt.SelectionColor = Theme.TextMuted;
-        rt.SelectionFont = Theme.Mono(10.5f);
+        rt.SelectionFont = Theme.Mono(10f);
         rt.AppendText("    " + PadWidth(key, 12));
         rt.SelectionColor = valueColor ?? Theme.Text;
         rt.AppendText(value + "\n");

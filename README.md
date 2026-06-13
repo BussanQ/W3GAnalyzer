@@ -36,8 +36,17 @@ W3GAnalyzer.exe --text <录像.w3g> [输出.txt]
 
 ```powershell
 dotnet build -c Release
-# 发布自包含单文件 exe（免安装运行时）
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist
+```
+
+发布自包含单文件 exe（免安装运行时，约 68 MB）：
+
+```powershell
+dotnet publish -c Release -r win-x64 --self-contained `
+  -p:PublishSingleFile=true `              # 打包成单个 exe
+  -p:EnableCompressionInSingleFile=true `  # 压缩，体积 146MB → 68MB
+  -p:IncludeNativeLibrariesForSelfExtract=true ` # 把原生 dll 也嵌入（否则散落在 exe 旁）
+  -p:DebugType=none `                      # 不生成 .pdb 调试符号
+  -o dist
 ```
 
 ## 项目结构
