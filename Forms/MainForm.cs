@@ -42,6 +42,7 @@ public sealed class MainForm : Form
         BackColor = Theme.Bg;
         ForeColor = Theme.Text;
         AllowDrop = true;
+        LoadAppIcon();
 
         _views = new Control[] { _overview, _players, _chat, _timeline, _mapCompare };
         _navs = new[]
@@ -78,6 +79,17 @@ public sealed class MainForm : Form
 
         if (initialFile != null)
             LoadFile(initialFile);
+    }
+
+    private void LoadAppIcon()
+    {
+        try
+        {
+            var asm = System.Reflection.Assembly.GetExecutingAssembly();
+            using var s = asm.GetManifestResourceStream("W3GAnalyzer.Assets.app.ico");
+            if (s != null) Icon = new Icon(s);
+        }
+        catch { /* 图标缺失不影响运行 */ }
     }
 
     protected override void OnHandleCreated(EventArgs e)
