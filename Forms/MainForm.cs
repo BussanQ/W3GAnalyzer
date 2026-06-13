@@ -1,68 +1,127 @@
+using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using System.Text;
 using W3GAnalyzer.Core;
+using W3GAnalyzer.UI;
 
 namespace W3GAnalyzer.Forms;
 
-/// <summary>主窗口：菜单 + 拖放 + 四个标签页（概览/玩家/聊天/时间线）。纯代码布局。</summary>
+/// <summary>主窗口：暗色科技风。自绘标题头 + 扁平导航标签 + 五个视图（概览/玩家/聊天/时间线/地图对比）。</summary>
 public sealed class MainForm : Form
 {
-    private readonly TextBox _overview = new();
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
+    private readonly RichTextBox _overview = new();
     private readonly DataGridView _players = new();
     private readonly DataGridView _chat = new();
-    private readonly ListView _timeline = new();
-    private readonly TextBox _mapCompare = new();
+    private readonly DataGridView _timeline = new();
+    private readonly RichTextBox _mapCompare = new();
+
     private readonly StatusStrip _status = new();
     private readonly ToolStripStatusLabel _statusLabel = new();
+    private readonly ToolStripStatusLabel _statusDot = new();
     private readonly ToolStripMenuItem _exportJson = new("导出 JSON(&J)");
     private readonly ToolStripMenuItem _exportText = new("导出文本(&T)");
     private readonly ToolStripMenuItem _compareMap = new("对比地图(&M)...");
-    private TabControl _tabs = null!;
-    private TabPage _tabMapCompare = null!;
+
+    private readonly Control[] _views;
+    private readonly NavButton[] _navs;
+    private const int ViewOverview = 0, ViewPlayers = 1, ViewChat = 2, ViewTimeline = 3, ViewMap = 4;
 
     private ReplaySummary? _current;
 
     public MainForm(string? initialFile = null)
     {
         Text = "魔兽争霸 III 录像分析器";
-        Width = 980;
-        Height = 680;
+        Width = 1040;
+        Height = 720;
+        MinimumSize = new Size(820, 560);
         StartPosition = FormStartPosition.CenterScreen;
-        Font = new Font("Microsoft YaHei UI", 9f);
+        Font = Theme.Ui(9f);
+        BackColor = Theme.Bg;
+        ForeColor = Theme.Text;
         AllowDrop = true;
 
-        BuildMenu();
-        BuildTabs();
-        BuildStatus();
+        _views = new Control[] { _overview, _players, _chat, _timeline, _mapCompare };
+        _navs = new[]
+        {
+            new NavButton("概览"), new NavButton("玩家"), new NavButton("聊天"),
+            new NavButton("时间线"), new NavButton("地图对比"),
+        };
+
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 4,
+            BackColor = Theme.Bg,
+        };
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 66)); // header
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 46)); // nav
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // content
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 26)); // status
+
+        root.Controls.Add(BuildHeader(), 0, 0);
+        root.Controls.Add(BuildNav(), 0, 1);
+        root.Controls.Add(BuildContent(), 0, 2);
+        root.Controls.Add(BuildStatus(), 0, 3);
+
+        Controls.Add(root);
+        Controls.Add(BuildMenu()); // 菜单最后加入 → 停靠在最顶
 
         DragEnter += OnDragEnter;
         DragDrop += OnDragDrop;
+
+        ShowView(ViewOverview);
+        ShowEmptyState();
 
         if (initialFile != null)
             LoadFile(initialFile);
     }
 
-    private void BuildMenu()
+    protected override void OnHandleCreated(EventArgs e)
     {
-        var menu = new MenuStrip();
-        var file = new ToolStripMenuItem("文件(&F)");
+        base.OnHandleCreated(e);
+        // 暗色标题栏（Win10 1809+ 用 19，Win10 2004+/Win11 用 20）
+        int on = 1;
+        if (DwmSetWindowAttribute(Handle, 20, ref on, sizeof(int)) != 0)
+            DwmSetWindowAttribute(Handle, 19, ref on, sizeof(int));
+    }
 
-        var open = new ToolStripMenuItem("打开(&O)...", null, (_, _) => OpenDialog())
-        { ShortcutKeys = Keys.Control | Keys.O };
+    // ── 菜单栏 ──
+    private MenuStrip BuildMenu()
+    {
+        var menu = new MenuStrip
+        {
+            Renderer = new DarkRenderer(),
+            BackColor = Theme.Surface,
+            ForeColor = Theme.Text,
+            Padding = new Padding(6, 2, 0, 2),
+        };
+
+        var file = new ToolStripMenuItem("文件(&F)") { ForeColor = Theme.Text };
+        var open = new ToolStripMenuItem("打开录像(&O)...", null, (_, _) => OpenDialog())
+        { ShortcutKeys = Keys.Control | Keys.O, ForeColor = Theme.Text };
+
         _exportJson.Enabled = false;
+        _exportJson.ForeColor = Theme.Text;
         _exportJson.Click += (_, _) => Export(json: true);
         _exportText.Enabled = false;
+        _exportText.ForeColor = Theme.Text;
         _exportText.Click += (_, _) => Export(json: false);
         _compareMap.Enabled = false;
+        _compareMap.ForeColor = Theme.Text;
         _compareMap.Click += (_, _) => ChooseAndCompareMap();
-        var exit = new ToolStripMenuItem("退出(&X)", null, (_, _) => Close());
 
+        var exit = new ToolStripMenuItem("退出(&X)", null, (_, _) => Close()) { ForeColor = Theme.Text };
         file.DropDownItems.AddRange(new ToolStripItem[]
         {
             open, _compareMap, new ToolStripSeparator(), _exportJson, _exportText,
             new ToolStripSeparator(), exit,
         });
 
-        var help = new ToolStripMenuItem("帮助(&H)");
+        var help = new ToolStripMenuItem("帮助(&H)") { ForeColor = Theme.Text };
         help.DropDownItems.Add(new ToolStripMenuItem("关于(&A)", null, (_, _) =>
             MessageBox.Show(this,
                 "魔兽争霸 III 录像 (.w3g) 分析器\n" +
@@ -70,88 +129,143 @@ public sealed class MainForm : Form
                 "可解析：版本、地图、玩家、聊天、APM、离开事件、时间线\n" +
                 "支持拖放打开，可导出 JSON / 文本\n" +
                 "加载录像后拖入 .w3x 地图可对比是否一致（按文件 SHA-256 指纹）",
-                "关于", MessageBoxButtons.OK, MessageBoxIcon.Information)));
+                "关于", MessageBoxButtons.OK, MessageBoxIcon.Information))
+        { ForeColor = Theme.Text });
 
         menu.Items.Add(file);
         menu.Items.Add(help);
         MainMenuStrip = menu;
-        Controls.Add(menu);
+        return menu;
     }
 
-    private void BuildTabs()
+    // ── 自绘标题头：徽标 + 字标 + 底部强调线 ──
+    private DBPanel BuildHeader()
     {
-        var tabs = new TabControl { Dock = DockStyle.Fill };
-        _tabs = tabs;
+        var header = new DBPanel { Dock = DockStyle.Fill, BackColor = Theme.Surface };
+        header.Paint += (_, e) =>
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-        // 概览
-        _overview.Multiline = true;
-        _overview.ReadOnly = true;
-        _overview.ScrollBars = ScrollBars.Both;
-        _overview.WordWrap = false;
-        _overview.Dock = DockStyle.Fill;
-        _overview.Font = new Font("Consolas", 10f);
-        _overview.BackColor = Color.White;
-        var tabOverview = new TabPage("概览");
-        tabOverview.Controls.Add(_overview);
+            // 徽标方块
+            var logo = new Rectangle(18, 16, 34, 34);
+            using (var path = Theme.RoundRect(logo, 8))
+            using (var grad = new LinearGradientBrush(logo, Theme.Accent, Theme.AccentDim, 60f))
+                g.FillPath(grad, path);
+            using (var lf = Theme.Ui(13f, FontStyle.Bold))
+            {
+                var sz = g.MeasureString("W3", lf);
+                g.DrawString("W3", lf, Brushes.Black,
+                    logo.Left + (logo.Width - sz.Width) / 2, logo.Top + (logo.Height - sz.Height) / 2);
+            }
 
-        // 玩家
-        ConfigureGrid(_players);
-        var tabPlayers = new TabPage("玩家");
-        tabPlayers.Controls.Add(_players);
+            // 字标
+            using (var wf = Theme.Ui(15f, FontStyle.Bold))
+            using (var b = new SolidBrush(Theme.Text))
+                g.DrawString("W3G ANALYZER", wf, b, 64, 10);
+            using (var sf = Theme.Ui(8.5f))
+            using (var b = new SolidBrush(Theme.TextMuted))
+                g.DrawString("魔兽争霸 III 录像解析 · 地图指纹比对", sf, b, 66, 36);
 
-        // 聊天
-        ConfigureGrid(_chat);
-        var tabChat = new TabPage("聊天");
-        tabChat.Controls.Add(_chat);
-
-        // 时间线
-        _timeline.Dock = DockStyle.Fill;
-        _timeline.View = View.Details;
-        _timeline.FullRowSelect = true;
-        _timeline.GridLines = true;
-        _timeline.Columns.Add("时间", 80);
-        _timeline.Columns.Add("类型", 70);
-        _timeline.Columns.Add("事件", 760);
-        var tabTimeline = new TabPage("时间线");
-        tabTimeline.Controls.Add(_timeline);
-
-        // 地图对比
-        _mapCompare.Multiline = true;
-        _mapCompare.ReadOnly = true;
-        _mapCompare.ScrollBars = ScrollBars.Both;
-        _mapCompare.WordWrap = false;
-        _mapCompare.Dock = DockStyle.Fill;
-        _mapCompare.Font = new Font("Consolas", 10f);
-        _mapCompare.BackColor = Color.White;
-        _mapCompare.Text = "先加载一个录像，然后把地图文件 (*.w3x/*.w3m) 拖到本窗口，\r\n"
-                         + "或用「文件 → 对比地图」选择地图，校验它是否与录像所用地图一致。";
-        _tabMapCompare = new TabPage("地图对比");
-        _tabMapCompare.Controls.Add(_mapCompare);
-
-        tabs.TabPages.AddRange(new[] { tabOverview, tabPlayers, tabChat, tabTimeline, _tabMapCompare });
-        Controls.Add(tabs);
-        tabs.BringToFront();
+            // 底部强调线：青色渐隐
+            int y = header.Height - 1;
+            using (var p = new Pen(Theme.Border)) g.DrawLine(p, 0, y, header.Width, y);
+            using (var grad = new LinearGradientBrush(
+                new Rectangle(0, y - 1, Math.Max(1, header.Width), 2), Theme.Accent, Theme.Surface, 0f))
+            using (var p = new Pen(grad, 2f))
+                g.DrawLine(p, 0, y, header.Width * 2 / 3, y);
+        };
+        return header;
     }
 
-    private static void ConfigureGrid(DataGridView grid)
+    // ── 扁平导航标签 ──
+    private DBPanel BuildNav()
     {
-        grid.Dock = DockStyle.Fill;
-        grid.ReadOnly = true;
-        grid.AllowUserToAddRows = false;
-        grid.AllowUserToDeleteRows = false;
-        grid.RowHeadersVisible = false;
-        grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-        grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-        grid.AllowUserToResizeRows = false;
-        grid.BackgroundColor = Color.White;
+        var bar = new DBPanel { Dock = DockStyle.Fill, BackColor = Theme.Surface };
+        var flow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Theme.Surface,
+            Padding = new Padding(10, 1, 0, 0),
+            WrapContents = false,
+        };
+        for (int i = 0; i < _navs.Length; i++)
+        {
+            int idx = i;
+            _navs[i].Click += (_, _) => ShowView(idx);
+            flow.Controls.Add(_navs[i]);
+        }
+        bar.Controls.Add(flow);
+        bar.Paint += (_, e) =>
+        {
+            int y = bar.Height - 1;
+            using var p = new Pen(Theme.Border);
+            e.Graphics.DrawLine(p, 0, y, bar.Width, y);
+        };
+        return bar;
     }
 
-    private void BuildStatus()
+    // ── 内容区：五视图叠放，按需切换可见 ──
+    private DBPanel BuildContent()
     {
-        _statusLabel.Text = "拖入或打开一个 .w3g 文件";
+        var host = new DBPanel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Theme.Bg,
+            Padding = new Padding(14, 12, 14, 12),
+        };
+
+        Theme.StyleReadout(_overview);
+        Theme.StyleReadout(_mapCompare);
+
+        Theme.StyleGrid(_players);
+        Theme.StyleGrid(_chat);
+
+        Theme.StyleGrid(_timeline);
+        _timeline.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+
+        foreach (var v in _views)
+        {
+            v.Dock = DockStyle.Fill;
+            v.Visible = false;
+            host.Controls.Add(v);
+        }
+        return host;
+    }
+
+    // ── 状态栏 ──
+    private StatusStrip BuildStatus()
+    {
+        _statusDot.Text = "●";
+        _statusDot.ForeColor = Theme.TextMuted;
+        _statusDot.Font = Theme.Ui(9f);
+        _statusLabel.Text = "等待载入 · 拖入或打开一个 .w3g 文件";
+        _statusLabel.ForeColor = Theme.TextMuted;
+
+        _status.Renderer = new DarkRenderer();
+        _status.BackColor = Theme.Surface;
+        _status.Dock = DockStyle.Fill;
+        _status.SizingGrip = false;
+        _status.Items.Add(_statusDot);
         _status.Items.Add(_statusLabel);
-        _status.Dock = DockStyle.Bottom;
-        Controls.Add(_status);
+        return _status;
+    }
+
+    private void SetStatus(string text, Color dot)
+    {
+        _statusDot.ForeColor = dot;
+        _statusLabel.Text = text;
+    }
+
+    private void ShowView(int index)
+    {
+        for (int i = 0; i < _views.Length; i++)
+        {
+            _views[i].Visible = i == index;
+            _navs[i].Active = i == index;
+        }
+        _views[index].BringToFront();
     }
 
     private void OpenDialog()
@@ -205,38 +319,47 @@ public sealed class MainForm : Form
         try
         {
             var r = MapFingerprint.Compare(_current, mapPath);
-            var sb = new StringBuilder();
-            sb.AppendLine("══════════ 地图对比 ══════════");
-            sb.AppendLine();
-            sb.AppendLine($"【结论】{r.Verdict}");
-            sb.AppendLine();
-            sb.AppendLine("── 录像所用地图 ──");
-            sb.AppendLine($"  地图名      : {r.ReplayMapName}");
-            sb.AppendLine($"  相对路径    : {r.ReplayMapPath}");
-            sb.AppendLine($"  录像内校验和: 0x{r.ReplayChecksum:X8}  （含 common.j/blizzard.j，跨补丁不可复现，仅供参考）");
-            sb.AppendLine();
-            sb.AppendLine("── 拖入的地图 ──");
-            sb.AppendLine($"  文件        : {r.DraggedPath}");
-            sb.AppendLine($"  大小        : {r.DraggedSize:N0} 字节");
-            sb.AppendLine($"  SHA-256     : {r.DraggedSha}");
-            sb.AppendLine($"  文件名匹配  : {(r.NameMatch ? "是" : "否")}");
-            sb.AppendLine();
+            Color vc = r.FingerprintMatch == true ? Theme.Good
+                     : r.FingerprintMatch == false ? Theme.Bad
+                     : Theme.Warn;
+
+            _mapCompare.Clear();
+            Section(_mapCompare, "对比结论");
+            _mapCompare.SelectionFont = Theme.Mono(11f, FontStyle.Bold);
+            _mapCompare.SelectionColor = vc;
+            _mapCompare.AppendText("  " + r.Verdict + "\n");
+
+            Section(_mapCompare, "录像所用地图");
+            Kv(_mapCompare, "地图名", r.ReplayMapName);
+            Kv(_mapCompare, "相对路径", r.ReplayMapPath);
+            Kv(_mapCompare, "内置校验和", $"0x{r.ReplayChecksum:X8}", Theme.TextMuted);
+            Hint(_mapCompare, "（含 common.j/blizzard.j，跨补丁不可复现，仅供参考）");
+
+            Section(_mapCompare, "拖入的地图");
+            Kv(_mapCompare, "文件", r.DraggedPath);
+            Kv(_mapCompare, "大小", $"{r.DraggedSize:N0} 字节");
+            Kv(_mapCompare, "SHA-256", r.DraggedSha, Theme.Accent);
+            Kv(_mapCompare, "文件名匹配", r.NameMatch ? "是" : "否", r.NameMatch ? Theme.Good : Theme.Bad);
+
             if (r.ReferencePath != null)
             {
-                sb.AppendLine("── 本机定位到的参照地图（录像路径）──");
-                sb.AppendLine($"  文件        : {r.ReferencePath}");
-                sb.AppendLine($"  大小        : {r.ReferenceSize:N0} 字节");
-                sb.AppendLine($"  SHA-256     : {r.ReferenceSha}");
-                sb.AppendLine($"  内容一致    : {(r.FingerprintMatch == true ? "是（完全相同）" : "否（同名不同内容）")}");
+                Section(_mapCompare, "本机定位到的参照地图");
+                Kv(_mapCompare, "文件", r.ReferencePath);
+                Kv(_mapCompare, "大小", $"{r.ReferenceSize:N0} 字节");
+                Kv(_mapCompare, "SHA-256", r.ReferenceSha, Theme.Accent);
+                Kv(_mapCompare, "内容一致", r.FingerprintMatch == true ? "是（完全相同）" : "否（同名不同内容）",
+                    r.FingerprintMatch == true ? Theme.Good : Theme.Bad);
             }
             else
             {
-                sb.AppendLine("── 参照地图 ──");
-                sb.AppendLine("  未能在录像路径对应位置定位到本机地图文件，只能做文件名级别比对。");
+                Section(_mapCompare, "参照地图");
+                Hint(_mapCompare, "  未能在录像路径对应位置定位到本机地图文件，只能做文件名级别比对。");
             }
-            _mapCompare.Text = sb.ToString().Replace("\n", "\r\n");
-            _tabs.SelectedTab = _tabMapCompare;
-            _statusLabel.Text = $"地图对比：{Path.GetFileName(mapPath)} — {r.Verdict}";
+            _mapCompare.SelectionStart = 0;
+            _mapCompare.ScrollToCaret();
+
+            ShowView(ViewMap);
+            SetStatus($"地图对比 · {Path.GetFileName(mapPath)} — {r.Verdict}", vc);
         }
         catch (Exception ex)
         {
@@ -256,47 +379,57 @@ public sealed class MainForm : Form
             _exportJson.Enabled = true;
             _exportText.Enabled = true;
             _compareMap.Enabled = true;
-            _statusLabel.Text = $"{Path.GetFileName(path)} · 解析 {sw.ElapsedMilliseconds} ms · " +
-                                $"警告 {_current.Warnings.Count}";
-            Text = $"{Path.GetFileName(path)} - 魔兽争霸 III 录像分析器";
+            ShowView(ViewOverview);
+            var dot = _current.Warnings.Count > 0 ? Theme.Warn : Theme.Good;
+            SetStatus($"{Path.GetFileName(path)} · 解析 {sw.ElapsedMilliseconds} ms · 警告 {_current.Warnings.Count}", dot);
+            Text = $"{Path.GetFileName(path)} — 魔兽争霸 III 录像分析器";
         }
         catch (Exception ex)
         {
             sw.Stop();
             MessageBox.Show(this, ex.Message, "解析失败",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
-            _statusLabel.Text = $"解析失败：{ex.Message}";
+            SetStatus($"解析失败：{ex.Message}", Theme.Bad);
         }
     }
 
     private void Populate(ReplaySummary s)
     {
-        // 概览
-        var sb = new StringBuilder();
-        sb.AppendLine($"文件      : {s.FilePath}");
-        sb.AppendLine($"游戏版本  : {s.Header.VersionDisplay}");
-        sb.AppendLine($"标识      : {s.Header.GameIdentifier}  flags=0x{s.Header.Flags:X4}");
-        sb.AppendLine($"地图      : {s.MapName}");
-        sb.AppendLine($"地图路径  : {s.MapPath}");
-        sb.AppendLine($"地图校验和: 0x{s.MapChecksum:X8}");
-        sb.AppendLine($"游戏名    : {s.GameName}");
-        sb.AppendLine($"主机      : {s.HostName}");
-        sb.AppendLine($"创建者    : {s.GameCreator}");
-        sb.AppendLine($"时长      : {s.DurationText}  ({s.DurationMs} ms)");
-        sb.AppendLine($"游戏速度  : {s.Settings.SpeedText}");
-        sb.AppendLine($"随机英雄  : {(s.Settings.RandomHero ? "是" : "否")}   随机种族: {(s.Settings.RandomRaces ? "是" : "否")}");
-        sb.AppendLine($"玩家数    : {s.Players.Count}");
-        if (s.WinnerGuess != null) sb.AppendLine($"推测胜方  : {s.WinnerGuess}");
+        // ── 概览 ──
+        _overview.Clear();
+        Section(_overview, "录像");
+        Kv(_overview, "文件", s.FilePath);
+        Kv(_overview, "游戏版本", s.Header.VersionDisplay, Theme.Accent);
+        Kv(_overview, "标识", $"{s.Header.GameIdentifier}   flags=0x{s.Header.Flags:X4}");
+
+        Section(_overview, "地图与对局");
+        Kv(_overview, "地图", s.MapName, Theme.Accent);
+        Kv(_overview, "地图路径", s.MapPath);
+        Kv(_overview, "地图校验和", $"0x{s.MapChecksum:X8}", Theme.TextMuted);
+        Kv(_overview, "游戏名", s.GameName);
+        Kv(_overview, "主机", s.HostName);
+        Kv(_overview, "创建者", s.GameCreator);
+        Kv(_overview, "时长", $"{s.DurationText}  ({s.DurationMs} ms)", Theme.Accent);
+        Kv(_overview, "游戏速度", s.Settings.SpeedText);
+        Kv(_overview, "随机英雄", s.Settings.RandomHero ? "是" : "否");
+        Kv(_overview, "随机种族", s.Settings.RandomRaces ? "是" : "否");
+        Kv(_overview, "玩家数", s.Players.Count.ToString());
+        if (s.WinnerGuess != null)
+            Kv(_overview, "推测胜方", s.WinnerGuess, Theme.Good);
+
         if (s.Warnings.Count > 0)
         {
-            sb.AppendLine();
-            sb.AppendLine("── 警告 ──");
-            foreach (var w in s.Warnings) sb.AppendLine($"  · {w}");
+            Section(_overview, "警告");
+            foreach (var w in s.Warnings)
+            {
+                _overview.SelectionColor = Theme.Warn;
+                _overview.AppendText("  · " + w + "\n");
+            }
         }
-        _overview.Text = sb.ToString().Replace("\n", "\r\n");
+        _overview.SelectionStart = 0;
+        _overview.ScrollToCaret();
 
-        // 玩家
-        _players.Columns.Clear();
+        // ── 玩家 ──
         _players.DataSource = s.Players.Select(p => new
         {
             ID = p.PlayerId,
@@ -310,8 +443,7 @@ public sealed class MainForm : Form
             离开原因 = p.LeaveReason ?? "-",
         }).ToList();
 
-        // 聊天
-        _chat.Columns.Clear();
+        // ── 聊天 ──
         _chat.DataSource = s.Chat.Select(c => new
         {
             时间 = Lookups.FormatTime(c.TimeMs),
@@ -327,15 +459,75 @@ public sealed class MainForm : Form
             _chat.Columns["内容"].FillWeight = 56;
         }
 
-        // 时间线
-        _timeline.Items.Clear();
-        foreach (var t in s.Timeline)
+        // ── 时间线 ──
+        _timeline.DataSource = s.Timeline.Select(t => new
         {
-            var item = new ListViewItem(Lookups.FormatTime(t.TimeMs));
-            item.SubItems.Add(t.Kind);
-            item.SubItems.Add(t.Description);
-            _timeline.Items.Add(item);
+            时间 = Lookups.FormatTime(t.TimeMs),
+            类型 = t.Kind,
+            事件 = t.Description,
+        }).ToList();
+        if (_timeline.Columns.Count > 0)
+        {
+            _timeline.Columns["时间"].FillWeight = 12;
+            _timeline.Columns["类型"].FillWeight = 14;
+            _timeline.Columns["事件"].FillWeight = 74;
         }
+    }
+
+    private void ShowEmptyState()
+    {
+        _overview.Clear();
+        _overview.SelectionColor = Theme.TextMuted;
+        _overview.SelectionFont = Theme.Mono(10.5f);
+        _overview.AppendText("\n\n");
+        _overview.SelectionColor = Theme.Accent;
+        _overview.SelectionFont = Theme.Mono(12f, FontStyle.Bold);
+        _overview.AppendText("   ▎尚未载入录像\n\n");
+        _overview.SelectionColor = Theme.TextMuted;
+        _overview.SelectionFont = Theme.Mono(10.5f);
+        _overview.AppendText(
+            "   · 把 .w3g 录像文件拖入本窗口，或用「文件 → 打开录像」\n" +
+            "   · 载入后可在上方标签查看玩家 / 聊天 / 时间线\n" +
+            "   · 再拖入 .w3x 地图，可按 SHA-256 指纹校验是否与录像一致\n");
+
+        _mapCompare.Clear();
+        _mapCompare.SelectionColor = Theme.TextMuted;
+        _mapCompare.SelectionFont = Theme.Mono(10.5f);
+        _mapCompare.AppendText(
+            "\n   先加载一个录像，然后把地图文件 (*.w3x/*.w3m) 拖到本窗口，\n" +
+            "   或用「文件 → 对比地图」选择地图，校验它是否与录像所用地图一致。\n");
+    }
+
+    // ── RichTextBox 着色助手 ──
+    private static void Section(RichTextBox rt, string title)
+    {
+        rt.SelectionColor = Theme.Accent;
+        rt.SelectionFont = Theme.Mono(10.5f, FontStyle.Bold);
+        rt.AppendText("\n  ▎" + title + "\n");
+    }
+
+    private static void Kv(RichTextBox rt, string key, string value, Color? valueColor = null)
+    {
+        rt.SelectionColor = Theme.TextMuted;
+        rt.SelectionFont = Theme.Mono(10.5f);
+        rt.AppendText("    " + PadWidth(key, 12));
+        rt.SelectionColor = valueColor ?? Theme.Text;
+        rt.AppendText(value + "\n");
+    }
+
+    private static void Hint(RichTextBox rt, string text)
+    {
+        rt.SelectionColor = Theme.TextMuted;
+        rt.SelectionFont = Theme.Mono(9f);
+        rt.AppendText("    " + new string(' ', 12) + text + "\n");
+    }
+
+    /// <summary>按显示宽度右侧补空格（中文按 2 宽计）。</summary>
+    private static string PadWidth(string s, int width)
+    {
+        int w = 0;
+        foreach (var ch in s) w += ch > 0x7F ? 2 : 1;
+        return w < width ? s + new string(' ', width - w) : s + " ";
     }
 
     private void Export(bool json)
@@ -351,7 +543,7 @@ public sealed class MainForm : Form
         {
             string content = json ? Exporter.ToJson(_current) : Exporter.ToText(_current);
             File.WriteAllText(dlg.FileName, content, new UTF8Encoding(false));
-            _statusLabel.Text = $"已导出：{dlg.FileName}";
+            SetStatus($"已导出：{dlg.FileName}", Theme.Good);
         }
         catch (Exception ex)
         {
