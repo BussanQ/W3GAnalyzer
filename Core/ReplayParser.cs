@@ -226,9 +226,10 @@ public sealed class ReplayParser
         try
         {
             s.Speed = r.ReadByte();
-            s.Visibility = r.ReadByte();
-            s.TeamsTogether = r.ReadByte();
-            byte shared = r.ReadByte();
+            s.Visibility = r.ReadByte();          // 字节 1：可见性位域
+            s.TeamFlags = r.ReadByte();           // 字节 2：队伍位域
+            byte shared = r.ReadByte();           // 字节 3：共享/随机位域
+            s.FullSharedControl = (shared & 0x01) != 0;
             s.RandomHero = (shared & 0x02) != 0;
             s.RandomRaces = (shared & 0x04) != 0;
 
@@ -261,6 +262,8 @@ public sealed class ReplayParser
                 Race = slot.Race,
                 IsObserver = slot.IsObserver,
                 IsComputer = slot.IsComputer,
+                AiStrength = slot.IsComputer ? slot.AiStrength : -1,
+                Handicap = slot.Handicap,
             };
             ps.Name = slot.IsComputer
                 ? $"电脑({Lookups.ColorName(slot.Color)})"
@@ -332,7 +335,7 @@ public sealed class ReplayParser
                             timeMs += inc;
                             int cmdLen = n - 2;
                             byte[] cmd = r.ReadBytes(cmdLen);
-                            ParseCommandData(cmd, byId, result);
+                            ParseCommandData(cmd, byId, result, timeMs);
                         }
                         // n < 2：空时间片，无增量
                         break;
@@ -391,7 +394,8 @@ public sealed class ReplayParser
 
     private static void ParseCommandData(byte[] cmd,
                                          Dictionary<byte, PlayerStats> byId,
-                                         ReplaySummary result)
+                                         ReplaySummary result,
+                                         uint timeMs)
     {
         var r = new BinaryReaderEx(cmd);
         while (r.Remaining >= 3)
@@ -405,7 +409,7 @@ public sealed class ReplayParser
             }
             byte[] slice = r.ReadBytes(len);
             if (byId.TryGetValue(pid, out var ps))
-                result.UnknownActionCount += ActionParser.Parse(slice, ps);
+                result.UnknownActionCount += ActionParser.Parse(slice, ps, timeMs);
         }
     }
 

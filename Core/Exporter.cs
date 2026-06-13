@@ -37,6 +37,9 @@ public static class Exporter
             settings = new
             {
                 speed = s.Settings.SpeedText,
+                visibility = s.Settings.VisibilityText,
+                fixedTeams = s.Settings.FixedTeams,
+                fullSharedControl = s.Settings.FullSharedControl,
                 randomHero = s.Settings.RandomHero,
                 randomRaces = s.Settings.RandomRaces,
             },
@@ -49,9 +52,27 @@ public static class Exporter
                 race = p.RaceText,
                 isObserver = p.IsObserver,
                 isComputer = p.IsComputer,
+                aiStrength = p.IsComputer ? p.AiText : null,
+                handicap = p.Handicap,
                 apm = p.Apm,
                 actions = p.TotalActions,
                 apmActions = p.ActionCount,
+                perMinuteApm = p.PerMinuteApm,
+                heroes = p.Heroes.OrderBy(h => p.HeroFirstMs.GetValueOrDefault(h.Key)).Select(h => new
+                {
+                    code = h.Key,
+                    name = ObjectData.NameOnly(h.Key),
+                    firstMs = p.HeroFirstMs.GetValueOrDefault(h.Key),
+                    count = h.Value,
+                }),
+                abilities = p.Abilities.OrderByDescending(a => a.Value).Select(a => new
+                {
+                    code = a.Key, name = ObjectData.NameOnly(a.Key), count = a.Value,
+                }),
+                builds = p.Builds.OrderByDescending(b => b.Value).Select(b => new
+                {
+                    code = b.Key, name = ObjectData.NameOnly(b.Key), count = b.Value,
+                }),
                 leftAtMs = p.LeftAtMs,
                 leaveReason = p.LeaveReason,
                 result = p.Result,

@@ -17,9 +17,10 @@ public static class ActionParser
     };
 
     /// <summary>
-    /// 解析单个玩家的动作切片，更新该玩家的统计。返回本切片内未识别到的动作数。
+    /// 解析单个玩家的动作切片，更新该玩家的统计（含按分钟分桶的 APM、英雄/技能/建造提取）。
+    /// <paramref name="timeMs"/> 是本切片所在 TimeSlot 的游戏时钟。返回本切片内未识别到的动作数。
     /// </summary>
-    public static long Parse(byte[] slice, PlayerStats stats)
+    public static long Parse(byte[] slice, PlayerStats stats, uint timeMs)
     {
         var r = new BinaryReaderEx(slice);
         long unknown = 0;
@@ -27,6 +28,22 @@ public static class ActionParser
         while (!r.Eof)
         {
             byte action = r.ReadByte();
+
+            // 0x10/0x11/0x12/0x14：能力/训练/建造/施法——读出 object-id 做深度提取。
+            if (action is 0x10 or 0x11 or 0x12 or 0x14)
+            {
+                int total = action switch { 0x10 => 14, 0x11 => 22, 0x12 => 30, _ => 43 };
+                if (total > r.Remaining) { unknown++; break; }
+                r.ReadUInt16();                  // ability flags
+                string? code = ReadObjectId(r);  // 消费 4 字节
+                r.Skip(total - 6);
+
+                stats.TotalActions++;
+                CountApm(stats, timeMs);         // 这几个都计入 APM
+                if (code != null) Record(stats, code, timeMs);
+                continue;
+            }
+
             int len;
             try
             {
@@ -57,11 +74,52 @@ public static class ActionParser
 
             stats.TotalActions++;
             if (ApmActions.Contains(action))
-                stats.ActionCount++;
+                CountApm(stats, timeMs);
         }
 
         return unknown;
     }
+
+    private static void CountApm(PlayerStats stats, uint timeMs)
+    {
+        stats.ActionCount++;
+        int minute = (int)(timeMs / 60000);
+        while (stats.PerMinuteApm.Count <= minute) stats.PerMinuteApm.Add(0);
+        stats.PerMinuteApm[minute]++;
+    }
+
+    private static void Record(PlayerStats stats, string code, uint timeMs)
+    {
+        switch (ObjectData.Categorize(code))
+        {
+            case ObjCat.Hero:
+                stats.Heroes[code] = stats.Heroes.GetValueOrDefault(code) + 1;
+                if (!stats.HeroFirstMs.ContainsKey(code)) stats.HeroFirstMs[code] = timeMs;
+                break;
+            case ObjCat.Ability:
+                stats.Abilities[code] = stats.Abilities.GetValueOrDefault(code) + 1;
+                break;
+            case ObjCat.Build:
+            case ObjCat.Upgrade:
+            case ObjCat.Item:
+                stats.Builds[code] = stats.Builds.GetValueOrDefault(code) + 1;
+                break;
+        }
+    }
+
+    /// <summary>读 4 字节 object-id。可打印的 4 字符编码按小端反转还原（如 "Hpal"）；
+    /// 否则是预定义指令号（移动/右键等），返回 null。</summary>
+    private static string? ReadObjectId(BinaryReaderEx r)
+    {
+        byte b0 = r.ReadByte(), b1 = r.ReadByte(), b2 = r.ReadByte(), b3 = r.ReadByte();
+        if (IsLetter(b3) && IsAlnum(b2) && IsAlnum(b1) && IsPrintable(b0))
+            return new string(new[] { (char)b3, (char)b2, (char)b1, (char)b0 });
+        return null;
+    }
+
+    private static bool IsLetter(byte b) => (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z');
+    private static bool IsAlnum(byte b) => IsLetter(b) || (b >= '0' && b <= '9');
+    private static bool IsPrintable(byte b) => b >= 0x20 && b < 0x7F;
 
     /// <summary>
     /// 返回 action id 后续负载的字节数；变长动作会就地从 reader 消费掉负载并返回 0。

@@ -120,6 +120,8 @@ public sealed class PlayerStats
     public int Race { get; set; } = -1;       // SlotRecord.Race 值
     public bool IsObserver { get; set; }
     public bool IsComputer { get; set; }
+    public int AiStrength { get; set; } = -1;  // 电脑难度 0简单/1普通/2疯狂
+    public int Handicap { get; set; } = 100;   // 血量惩罚（让分）百分比
 
     public long ActionCount { get; set; }     // 计入 APM 的动作数
     public long TotalActions { get; set; }    // 全部已识别动作数
@@ -129,21 +131,40 @@ public sealed class PlayerStats
 
     public double Apm { get; set; }
 
+    // 动作流深度提取（按 object-id）
+    public List<int> PerMinuteApm { get; } = new();               // 下标=分钟，值=该分钟计入 APM 的动作数
+    public Dictionary<string, int> Heroes { get; } = new();        // 英雄编码 → 次数
+    public Dictionary<string, uint> HeroFirstMs { get; } = new();  // 英雄编码 → 首次出现时间
+    public Dictionary<string, int> Abilities { get; } = new();     // 技能编码 → 施放/学习次数
+    public Dictionary<string, int> Builds { get; } = new();        // 单位/建筑/升级编码 → 次数
+
     public string TeamText => IsObserver ? "观察者" : (Team >= 0 ? $"队伍 {Team + 1}" : "-");
     public string ColorText => Lookups.ColorName(Color);
     public string RaceText => Lookups.RaceName(Race);
+    public string AiText => IsComputer
+        ? AiStrength switch { 0 => "简单", 1 => "普通", 2 => "疯狂", _ => "电脑" }
+        : "-";
+    public string HandicapText => Handicap is > 0 and < 100 ? $"{Handicap}%" : "-";
 }
 
 public sealed class GameSettings
 {
     public byte Speed { get; set; }           // 0 慢 1 中 2 快
-    public byte Visibility { get; set; }
-    public byte Observer { get; set; }
-    public byte TeamsTogether { get; set; }
+    public byte Visibility { get; set; }      // 可见性位域（字节 1）
+    public byte TeamFlags { get; set; }       // 队伍位域（字节 2）
+    public bool FullSharedControl { get; set; }
     public bool RandomHero { get; set; }
     public bool RandomRaces { get; set; }
 
     public string SpeedText => Speed switch { 0 => "慢速", 1 => "普通", 2 => "快速", _ => $"({Speed})" };
+
+    public string VisibilityText =>
+        (Visibility & 0x01) != 0 ? "隐藏地形"
+      : (Visibility & 0x02) != 0 ? "地图已探明"
+      : (Visibility & 0x04) != 0 ? "无战争迷雾"
+      : "默认";
+
+    public bool FixedTeams => (TeamFlags & 0x06) != 0;
 }
 
 /// <summary>一份录像解析后的完整结果。</summary>
@@ -189,6 +210,15 @@ public static class Lookups
         0 => "红", 1 => "蓝", 2 => "青", 3 => "紫", 4 => "黄", 5 => "橙",
         6 => "绿", 7 => "粉", 8 => "灰", 9 => "浅蓝", 10 => "深绿", 11 => "棕",
         _ => c >= 0 ? c.ToString() : "-",
+    };
+
+    /// <summary>魔兽 12 个玩家槽位颜色的 RGB（用于图表着色）。</summary>
+    public static (int R, int G, int B) ColorRgb(int c) => c switch
+    {
+        0 => (255, 3, 3), 1 => (0, 66, 255), 2 => (28, 230, 185), 3 => (84, 0, 129),
+        4 => (255, 252, 0), 5 => (254, 138, 14), 6 => (32, 192, 0), 7 => (229, 91, 176),
+        8 => (149, 150, 151), 9 => (126, 191, 241), 10 => (16, 98, 70), 11 => (78, 42, 4),
+        _ => (90, 184, 255),
     };
 
     public static string RaceName(int r) => r switch

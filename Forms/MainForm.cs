@@ -6,7 +6,8 @@ using W3GAnalyzer.UI;
 
 namespace W3GAnalyzer.Forms;
 
-/// <summary>主窗口：暗色科技风。自绘标题头 + 扁平导航标签 + 五个视图（概览/玩家/聊天/时间线/地图对比）。</summary>
+/// <summary>主窗口：暗色科技风。自绘标题头 + 扁平导航标签 + 七个视图
+/// （概览/玩家/聊天/英雄技能/APM曲线/时间线/地图对比）。</summary>
 public sealed class MainForm : Form
 {
     [DllImport("dwmapi.dll")]
@@ -15,6 +16,9 @@ public sealed class MainForm : Form
     private readonly RichTextBox _overview = new();
     private readonly DataGridView _players = new();
     private readonly DataGridView _chat = new();
+    private readonly RichTextBox _heroes = new();
+    private readonly LineChart _apmChart = new();
+    private readonly DBPanel _apmView = new();
     private readonly DataGridView _timeline = new();
     private readonly RichTextBox _mapCompare = new();
 
@@ -27,7 +31,8 @@ public sealed class MainForm : Form
 
     private readonly Control[] _views;
     private readonly NavButton[] _navs;
-    private const int ViewOverview = 0, ViewPlayers = 1, ViewChat = 2, ViewTimeline = 3, ViewMap = 4;
+    private const int ViewOverview = 0, ViewPlayers = 1, ViewChat = 2,
+                      ViewHeroes = 3, ViewApm = 4, ViewTimeline = 5, ViewMap = 6;
 
     private ReplaySummary? _current;
 
@@ -44,11 +49,12 @@ public sealed class MainForm : Form
         AllowDrop = true;
         LoadAppIcon();
 
-        _views = new Control[] { _overview, _players, _chat, _timeline, _mapCompare };
+        _views = new Control[] { _overview, _players, _chat, _heroes, _apmView, _timeline, _mapCompare };
         _navs = new[]
         {
             new NavButton("概览"), new NavButton("玩家"), new NavButton("聊天"),
-            new NavButton("时间线"), new NavButton("地图对比"),
+            new NavButton("英雄技能"), new NavButton("APM 曲线"), new NavButton("时间线"),
+            new NavButton("地图对比"),
         };
 
         var root = new TableLayoutPanel
@@ -257,12 +263,31 @@ public sealed class MainForm : Form
 
         Theme.StyleReadout(_overview);
         Theme.StyleReadout(_mapCompare);
+        Theme.StyleReadout(_heroes);
 
         Theme.StyleGrid(_players);
         Theme.StyleGrid(_chat);
 
         Theme.StyleGrid(_timeline);
         _timeline.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+
+        // APM 曲线视图：图表 + 底部说明
+        _apmChart.Dock = DockStyle.Fill;
+        _apmChart.YUnit = "每分钟操作数";
+        _apmChart.Empty = "载入录像后显示各玩家每分钟 APM 曲线";
+        var apmNote = new Label
+        {
+            Dock = DockStyle.Bottom,
+            Height = 42,
+            BackColor = Theme.Surface,
+            ForeColor = Theme.TextMuted,
+            Font = Theme.Ui(9f),
+            Padding = new Padding(12, 6, 12, 6),
+            Text = "APM 曲线 = 每分钟「计入 APM 的操作数」。注：魔兽录像只记录操作指令、不记录金钱/资源状态，"
+                 + "因此无法绘制金钱/木材曲线（电脑玩家不记录操作，无曲线）。",
+        };
+        _apmView.Controls.Add(_apmChart);
+        _apmView.Controls.Add(apmNote);
 
         foreach (var v in _views)
         {
@@ -459,12 +484,17 @@ public sealed class MainForm : Form
         Kv(_overview, "主机", s.HostName);
         Kv(_overview, "创建者", s.GameCreator);
         Kv(_overview, "时长", $"{s.DurationText}  ({s.DurationMs} ms)", Theme.Accent);
-        Kv(_overview, "游戏速度", s.Settings.SpeedText);
-        Kv(_overview, "随机英雄", s.Settings.RandomHero ? "是" : "否");
-        Kv(_overview, "随机种族", s.Settings.RandomRaces ? "是" : "否");
         Kv(_overview, "玩家数", s.Players.Count.ToString());
         if (s.WinnerGuess != null)
             Kv(_overview, "推测胜方", s.WinnerGuess, Theme.Good);
+
+        Section(_overview, "对局设置");
+        Kv(_overview, "游戏速度", s.Settings.SpeedText);
+        Kv(_overview, "可见性", s.Settings.VisibilityText);
+        Kv(_overview, "固定队伍", s.Settings.FixedTeams ? "是" : "否");
+        Kv(_overview, "共享单位控制", s.Settings.FullSharedControl ? "是" : "否");
+        Kv(_overview, "随机英雄", s.Settings.RandomHero ? "是" : "否");
+        Kv(_overview, "随机种族", s.Settings.RandomRaces ? "是" : "否");
 
         if (s.Warnings.Count > 0)
         {
@@ -488,6 +518,8 @@ public sealed class MainForm : Form
             种族 = p.RaceText,
             APM = p.Apm,
             动作数 = p.TotalActions,
+            难度 = p.AiText,
+            让分 = p.HandicapText,
             离开时间 = p.LeftAtMs.HasValue ? Lookups.FormatTime(p.LeftAtMs.Value) : "-",
             离开原因 = p.LeaveReason ?? "-",
         }).ToList();
@@ -521,6 +553,115 @@ public sealed class MainForm : Form
             _timeline.Columns["类型"].FillWeight = 14;
             _timeline.Columns["事件"].FillWeight = 74;
         }
+
+        PopulateHeroes(s);
+        PopulateApm(s);
+    }
+
+    // ── 英雄与技能 ──
+    private void PopulateHeroes(ReplaySummary s)
+    {
+        _heroes.Clear();
+        var actives = s.Players
+            .Where(p => p.Heroes.Count > 0 || p.Abilities.Count > 0 || p.Builds.Count > 0)
+            .ToList();
+
+        if (actives.Count == 0)
+        {
+            _heroes.SelectionColor = Theme.TextMuted;
+            _heroes.SelectionFont = Theme.Ui(10.5f);
+            _heroes.AppendText("\n   本录像未提取到英雄/技能数据。\n"
+                + "   （观察者录像、空动作流、或仅含未识别的自定义指令时会出现这种情况）\n");
+            return;
+        }
+
+        _heroes.SelectionColor = Theme.TextMuted;
+        _heroes.SelectionFont = Theme.Ui(9f);
+        _heroes.AppendText("  由动作流提取（编码后括号内为魔兽 object-id，便于核对）\n");
+
+        foreach (var p in actives)
+        {
+            var (cr, cg, cb) = Lookups.ColorRgb(p.Color);
+            var pc = Color.FromArgb(cr, cg, cb);
+
+            _heroes.SelectionColor = pc;
+            _heroes.SelectionFont = Theme.Ui(12.5f, FontStyle.Bold);
+            _heroes.AppendText("\n  " + p.Name + "\n");
+            _heroes.SelectionColor = Theme.TextMuted;
+            _heroes.SelectionFont = Theme.Ui(9f);
+            _heroes.AppendText($"    {p.TeamText} · {p.RaceText} · APM {p.Apm}\n");
+
+            if (p.Heroes.Count > 0)
+            {
+                HeroSub("英雄");
+                foreach (var kv in p.Heroes.OrderBy(k => p.HeroFirstMs.GetValueOrDefault(k.Key)))
+                {
+                    uint first = p.HeroFirstMs.GetValueOrDefault(kv.Key);
+                    _heroes.SelectionColor = Theme.Accent;
+                    _heroes.SelectionFont = Theme.Mono(10f, FontStyle.Bold);
+                    _heroes.AppendText("    ★ " + ObjectData.Display(kv.Key));
+                    _heroes.SelectionColor = Theme.TextMuted;
+                    _heroes.SelectionFont = Theme.Mono(9.5f);
+                    _heroes.AppendText("   出场 " + Lookups.FormatTime(first)
+                        + (kv.Value > 1 ? $"  ×{kv.Value}" : "") + "\n");
+                }
+            }
+
+            if (p.Abilities.Count > 0)
+            {
+                HeroSub("技能 / 法术");
+                HeroItems(p.Abilities, 14);
+            }
+
+            if (p.Builds.Count > 0)
+            {
+                HeroSub("建造 / 科技（按次数 Top 16）");
+                HeroItems(p.Builds, 16);
+            }
+        }
+        _heroes.SelectionStart = 0;
+        _heroes.ScrollToCaret();
+    }
+
+    private void HeroSub(string title)
+    {
+        _heroes.SelectionColor = Theme.Amber;
+        _heroes.SelectionFont = Theme.Ui(9.5f, FontStyle.Bold);
+        _heroes.AppendText("    " + title + "\n");
+    }
+
+    private void HeroItems(Dictionary<string, int> dict, int top)
+    {
+        foreach (var kv in dict.OrderByDescending(k => k.Value).Take(top))
+        {
+            _heroes.SelectionColor = Theme.Text;
+            _heroes.SelectionFont = Theme.Mono(9.5f);
+            _heroes.AppendText("    • " + ObjectData.Display(kv.Key));
+            if (kv.Value > 1)
+            {
+                _heroes.SelectionColor = Theme.TextMuted;
+                _heroes.AppendText("  ×" + kv.Value);
+            }
+            _heroes.AppendText("\n");
+        }
+    }
+
+    // ── APM 曲线 ──
+    private void PopulateApm(ReplaySummary s)
+    {
+        var series = s.Players
+            .Where(p => !p.IsObserver && p.PerMinuteApm.Any(v => v > 0))
+            .Select(p =>
+            {
+                var (cr, cg, cb) = Lookups.ColorRgb(p.Color);
+                return new LineChart.Series
+                {
+                    Name = $"{p.Name} (均 {p.Apm})",
+                    Color = Color.FromArgb(cr, cg, cb),
+                    Values = p.PerMinuteApm,
+                };
+            });
+        _apmChart.SetSeries(series);
     }
 
     private void ShowEmptyState()
