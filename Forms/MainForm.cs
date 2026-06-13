@@ -8,7 +8,7 @@ namespace W3GAnalyzer.Forms;
 
 /// <summary>主窗口：暗色科技风。自绘标题头 + 扁平导航标签 + 七个视图
 /// （概览/玩家/聊天/英雄技能/APM曲线/时间线/地图对比）。</summary>
-public sealed class MainForm : Form
+public sealed partial class MainForm : Form
 {
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
@@ -35,6 +35,7 @@ public sealed class MainForm : Form
                       ViewHeroes = 3, ViewApm = 4, ViewTimeline = 5, ViewMap = 6;
 
     private ReplaySummary? _current;
+    private bool _loading;   // 解析进行中，避免重入（多次打开/拖放）
 
     public MainForm(string? initialFile = null)
     {
@@ -434,14 +435,21 @@ public sealed class MainForm : Form
         }
     }
 
-    private void LoadFile(string path)
+    private async void LoadFile(string path)
     {
+        if (_loading) return;            // 解析进行中，忽略重复触发
+        _loading = true;
         var sw = System.Diagnostics.Stopwatch.StartNew();
+        var prevCursor = Cursor;
+        Cursor = Cursors.WaitCursor;
+        SetStatus($"正在解析 {Path.GetFileName(path)}…", Theme.Warn);
         try
         {
-            _current = ReplayParser.Parse(path);
+            // 解析与文件 I/O 移到后台线程，避免大录像时 UI 冻结。
+            // ReplayParser.Parse 是纯静态、无 UI 依赖，可安全地在 Task.Run 中执行。
+            _current = await Task.Run(() => ReplayParser.Parse(path));
             sw.Stop();
-            Populate(_current);
+            Populate(_current);          // await 之后已回到 UI 线程
             _exportJson.Enabled = true;
             _exportText.Enabled = true;
             _compareMap.Enabled = true;
@@ -456,6 +464,11 @@ public sealed class MainForm : Form
             MessageBox.Show(this, ex.Message, "解析失败",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
             SetStatus($"解析失败：{ex.Message}", Theme.Bad);
+        }
+        finally
+        {
+            Cursor = prevCursor;
+            _loading = false;
         }
     }
 
@@ -685,48 +698,6 @@ public sealed class MainForm : Form
         _mapCompare.AppendText(
             "\n   先加载一个录像，然后把地图文件 (*.w3x/*.w3m) 拖到本窗口，\n" +
             "   或用「文件 → 对比地图」选择地图，校验它是否与录像所用地图一致。\n");
-    }
-
-    // ── RichTextBox 着色助手 ──
-    private static void OverviewTitle(RichTextBox rt, ReplaySummary s)
-    {
-        rt.SelectionColor = Theme.Text;
-        rt.SelectionFont = Theme.Ui(16f, FontStyle.Bold);
-        rt.AppendText("  " + (string.IsNullOrWhiteSpace(s.GameName) ? "已载入录像" : s.GameName) + "\n");
-        rt.SelectionColor = Theme.TextMuted;
-        rt.SelectionFont = Theme.Ui(9.5f);
-        rt.AppendText($"  {Path.GetFileName(s.FilePath)}  ·  {s.Header.VersionDisplay}  ·  {s.MapName}\n");
-    }
-
-    private static void Section(RichTextBox rt, string title)
-    {
-        rt.SelectionColor = Theme.Amber;
-        rt.SelectionFont = Theme.Ui(10.5f, FontStyle.Bold);
-        rt.AppendText("\n  " + title + "\n");
-    }
-
-    private static void Kv(RichTextBox rt, string key, string value, Color? valueColor = null)
-    {
-        rt.SelectionColor = Theme.TextMuted;
-        rt.SelectionFont = Theme.Mono(10f);
-        rt.AppendText("    " + PadWidth(key, 12));
-        rt.SelectionColor = valueColor ?? Theme.Text;
-        rt.AppendText(value + "\n");
-    }
-
-    private static void Hint(RichTextBox rt, string text)
-    {
-        rt.SelectionColor = Theme.TextMuted;
-        rt.SelectionFont = Theme.Mono(9f);
-        rt.AppendText("    " + new string(' ', 12) + text + "\n");
-    }
-
-    /// <summary>按显示宽度右侧补空格（中文按 2 宽计）。</summary>
-    private static string PadWidth(string s, int width)
-    {
-        int w = 0;
-        foreach (var ch in s) w += ch > 0x7F ? 2 : 1;
-        return w < width ? s + new string(' ', width - w) : s + " ";
     }
 
     private void Export(bool json)

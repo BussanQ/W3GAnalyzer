@@ -152,7 +152,7 @@ public sealed class ReplayParser
         r.ReadUInt32();              // language id
 
         // 其余玩家记录
-        while (r.Peek() == 0x16)
+        while (r.Peek() == (byte)BlockId.PlayerRecord)
         {
             var p = ReadPlayerRecord(r);
             players[p.PlayerId] = p;
@@ -161,9 +161,9 @@ public sealed class ReplayParser
 
         // GameStartRecord
         var slots = new List<SlotRecord>();
-        if (r.Peek() == 0x19)
+        if (r.Peek() == (byte)BlockId.GameStartRecord)
         {
-            r.ReadByte();                       // 0x19
+            r.ReadByte();                       // 0x19 GameStartRecord
             int dataSize = r.ReadUInt16();
             int nSlots = r.ReadByte();
             int slotBytes = nSlots > 0 ? (dataSize - 7) / nSlots : 9;
@@ -295,13 +295,13 @@ public sealed class ReplayParser
             while (!r.Eof)
             {
                 byte block = r.ReadByte();
-                switch (block)
+                switch ((BlockId)block)
                 {
-                    case 0x00:
+                    case BlockId.EndPadding:
                         // 末尾填充
                         goto done;
 
-                    case 0x17: // LeaveGame
+                    case BlockId.LeaveGame:
                     {
                         uint reason = r.ReadUInt32();
                         byte pid = r.ReadByte();
@@ -322,11 +322,14 @@ public sealed class ReplayParser
                         break;
                     }
 
-                    case 0x1A: case 0x1B: case 0x1C:
+                    case BlockId.Unknown1A:
+                    case BlockId.Unknown1B:
+                    case BlockId.Unknown1C:
                         r.Skip(4);
                         break;
 
-                    case 0x1E: case 0x1F: // TimeSlot
+                    case BlockId.TimeSlotA:
+                    case BlockId.TimeSlotB:
                     {
                         int n = r.ReadUInt16();
                         if (n >= 2)
@@ -341,7 +344,7 @@ public sealed class ReplayParser
                         break;
                     }
 
-                    case 0x20: // ChatMessage
+                    case BlockId.ChatMessage:
                     {
                         byte pid = r.ReadByte();
                         int byteCount = r.ReadUInt16();
@@ -350,18 +353,18 @@ public sealed class ReplayParser
                         break;
                     }
 
-                    case 0x22:
+                    case BlockId.Unknown22:
                     {
                         int len = r.ReadByte();
                         r.Skip(len);
                         break;
                     }
 
-                    case 0x23:
+                    case BlockId.Unknown23:
                         r.Skip(10);
                         break;
 
-                    case 0x2F:
+                    case BlockId.Countdown2F:
                         r.Skip(8);
                         break;
 

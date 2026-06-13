@@ -9,11 +9,87 @@ namespace W3GAnalyzer.Core;
 /// </summary>
 public static class ActionParser
 {
-    // 计入 APM 的动作（w3gjs / php-parser 惯例）：下达命令、选择/编队、子组、
-    // 出队列、ESC、进入技能/建造子菜单。暂停/变速/存档/同步/作弊不计。
-    private static readonly HashSet<byte> ApmActions = new()
+    /// <summary>
+    /// 单个动作的元数据。把原先散落三处的信息（长度、是否计 APM、是否需深度提取
+    /// object-id）合并为一张声明式表，新增动作只需在 <see cref="Actions"/> 加一行。
+    /// </summary>
+    /// <param name="FixedLen">定长动作的负载字节数（<see cref="Read"/> 为 null 时使用）。</param>
+    /// <param name="Read">变长动作：就地从 reader 消费负载，返回还需跳过的字节数。</param>
+    /// <param name="CountsApm">是否计入 APM（取代旧的 ApmActions 集合）。</param>
+    /// <param name="ObjectIdLen">&gt;0 表示需读出 object-id 做深度提取，值为动作总长度。</param>
+    private readonly record struct ActionDef(
+        int FixedLen,
+        Func<BinaryReaderEx, int>? Read,
+        bool CountsApm,
+        int ObjectIdLen);
+
+    private static ActionDef Fixed(int len, bool apm = false) => new(len, null, apm, 0);
+    private static ActionDef Var(Func<BinaryReaderEx, int> read, bool apm = false) => new(0, read, apm, 0);
+    private static ActionDef Obj(int total) => new(0, null, true, total);
+
+    // 动作长度表对应 patch >=1.13。计入 APM 的动作遵循 w3gjs / php-parser 惯例：
+    // 下达命令、选择/编队、子组、出队列、ESC、进入技能/建造子菜单。
+    // 暂停/变速/存档/同步/作弊不计。未列入的 id 视为未知，放弃本切片剩余部分。
+    private static readonly Dictionary<byte, ActionDef> Actions = new()
     {
-        0x10, 0x11, 0x12, 0x13, 0x14, 0x16, 0x17, 0x18, 0x19, 0x1E, 0x61, 0x66, 0x67,
+        // 暂停/变速类
+        [0x01] = Fixed(0),   // pause
+        [0x02] = Fixed(0),   // resume
+        [0x03] = Fixed(1),   // set speed
+        [0x04] = Fixed(0),   // increase speed
+        [0x05] = Fixed(0),   // decrease speed
+        [0x06] = Var(r => { r.ReadCStringRaw(); return 0; }),  // save game：跟一个 C 字符串
+        [0x07] = Fixed(4),   // save finished
+
+        // 单位/建筑命令（0x10/0x11/0x12/0x14 深度提取 object-id，均计 APM）
+        [0x10] = Obj(14),               // ability，无目标
+        [0x11] = Obj(22),               // ability + 目标坐标
+        [0x12] = Obj(30),               // ability + 坐标 + 目标对象
+        [0x13] = Fixed(38, apm: true),  // give/drop item
+        [0x14] = Obj(43),               // ability + 两组目标
+
+        [0x16] = Var(r => { r.ReadByte(); return r.ReadUInt16() * 8; }, apm: true),  // change selection
+        [0x17] = Var(r => { r.ReadByte(); return r.ReadUInt16() * 8; }, apm: true),  // assign group hotkey
+        [0x18] = Fixed(2, apm: true),   // select group hotkey
+        [0x19] = Fixed(12, apm: true),  // select subgroup (>=1.14b)
+        [0x1A] = Fixed(0),   // pre subselect
+        [0x1B] = Fixed(9),   // unknown
+        [0x1C] = Fixed(9),   // select ground item
+        [0x1D] = Fixed(8),   // cancel hero revival
+        [0x1E] = Fixed(5, apm: true),   // remove unit from build queue
+        [0x21] = Fixed(8),   // unknown
+
+        // 作弊码：大多 0 字节，少数有负载
+        [0x20] = Fixed(0),
+        [0x22] = Fixed(0),
+        [0x23] = Fixed(0),
+        [0x24] = Fixed(0),
+        [0x25] = Fixed(0),
+        [0x26] = Fixed(0),
+        [0x27] = Fixed(5),
+        [0x28] = Fixed(5),
+        [0x29] = Fixed(0),
+        [0x2A] = Fixed(0),
+        [0x2B] = Fixed(0),
+        [0x2C] = Fixed(0),
+        [0x2D] = Fixed(5),
+        [0x2E] = Fixed(4),
+        [0x2F] = Fixed(0),
+        [0x30] = Fixed(0),
+        [0x31] = Fixed(0),
+        [0x32] = Fixed(0),
+
+        [0x50] = Fixed(5),   // change ally options
+        [0x51] = Fixed(9),   // transfer resources
+        [0x60] = Var(r => { r.Skip(8); r.ReadCStringRaw(); return 0; }),  // map trigger chat command
+        [0x61] = Fixed(0, apm: true),   // ESC pressed
+        [0x62] = Fixed(12),  // scenario trigger
+        [0x66] = Fixed(0, apm: true),   // enter hero skill submenu
+        [0x67] = Fixed(0, apm: true),   // enter building submenu
+        [0x68] = Fixed(12),  // minimap signal (ping)
+        [0x69] = Fixed(16),  // continue game (block B)
+        [0x6A] = Fixed(16),  // continue game (block A)
+        [0x75] = Fixed(1),   // unknown
     };
 
     /// <summary>
@@ -29,17 +105,24 @@ public static class ActionParser
         {
             byte action = r.ReadByte();
 
-            // 0x10/0x11/0x12/0x14：能力/训练/建造/施法——读出 object-id 做深度提取。
-            if (action is 0x10 or 0x11 or 0x12 or 0x14)
+            if (!Actions.TryGetValue(action, out var def))
             {
-                int total = action switch { 0x10 => 14, 0x11 => 22, 0x12 => 30, _ => 43 };
+                // 未知动作 id：无法确定长度，安全起见放弃本切片剩余部分。
+                unknown++;
+                break;
+            }
+
+            // 0x10/0x11/0x12/0x14：能力/训练/建造/施法——读出 object-id 做深度提取。
+            if (def.ObjectIdLen > 0)
+            {
+                int total = def.ObjectIdLen;
                 if (total > r.Remaining) { unknown++; break; }
                 r.ReadUInt16();                  // ability flags
                 string? code = ReadObjectId(r);  // 消费 4 字节
                 r.Skip(total - 6);
 
                 stats.TotalActions++;
-                CountApm(stats, timeMs);         // 这几个都计入 APM
+                if (def.CountsApm) CountApm(stats, timeMs);
                 if (code != null) Record(stats, code, timeMs);
                 continue;
             }
@@ -47,18 +130,11 @@ public static class ActionParser
             int len;
             try
             {
-                len = ActionLength(action, r);
+                len = def.Read != null ? def.Read(r) : def.FixedLen;
             }
             catch (ReplayParseException)
             {
                 // 越界（变长动作读取失败）——本切片到此为止。
-                unknown++;
-                break;
-            }
-
-            if (len < 0)
-            {
-                // 未知动作 id：无法确定长度，安全起见放弃本切片剩余部分。
                 unknown++;
                 break;
             }
@@ -73,8 +149,7 @@ public static class ActionParser
             r.Skip(len);
 
             stats.TotalActions++;
-            if (ApmActions.Contains(action))
-                CountApm(stats, timeMs);
+            if (def.CountsApm) CountApm(stats, timeMs);
         }
 
         return unknown;
@@ -120,92 +195,4 @@ public static class ActionParser
     private static bool IsLetter(byte b) => (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z');
     private static bool IsAlnum(byte b) => IsLetter(b) || (b >= '0' && b <= '9');
     private static bool IsPrintable(byte b) => b >= 0x20 && b < 0x7F;
-
-    /// <summary>
-    /// 返回 action id 后续负载的字节数；变长动作会就地从 reader 消费掉负载并返回 0。
-    /// 未知 id 返回 -1。
-    /// </summary>
-    private static int ActionLength(byte action, BinaryReaderEx r)
-    {
-        switch (action)
-        {
-            // 暂停/变速类
-            case 0x01: return 0;   // pause
-            case 0x02: return 0;   // resume
-            case 0x03: return 1;   // set speed
-            case 0x04: return 0;   // increase speed
-            case 0x05: return 0;   // decrease speed
-
-            case 0x06:             // save game：跟一个 C 字符串
-                r.ReadCStringRaw();
-                return 0;
-            case 0x07: return 4;   // save finished
-
-            // 单位/建筑命令
-            case 0x10: return 14;  // ability，无目标
-            case 0x11: return 22;  // ability + 目标坐标
-            case 0x12: return 30;  // ability + 坐标 + 目标对象
-            case 0x13: return 38;  // give/drop item
-            case 0x14: return 43;  // ability + 两组目标
-
-            case 0x16:             // change selection
-            {
-                r.ReadByte();             // select mode
-                int n = r.ReadUInt16();
-                return n * 8;
-            }
-            case 0x17:             // assign group hotkey
-            {
-                r.ReadByte();             // group number
-                int n = r.ReadUInt16();
-                return n * 8;
-            }
-            case 0x18: return 2;   // select group hotkey
-            case 0x19: return 12;  // select subgroup (>=1.14b)
-            case 0x1A: return 0;   // pre subselect
-            case 0x1B: return 9;   // unknown
-            case 0x1C: return 9;   // select ground item
-            case 0x1D: return 8;   // cancel hero revival
-            case 0x1E: return 5;   // remove unit from build queue
-            case 0x21: return 8;   // unknown
-
-            // 作弊码：大多 0 字节，少数有负载
-            case 0x20: return 0;
-            case 0x22: return 0;
-            case 0x23: return 0;
-            case 0x24: return 0;
-            case 0x25: return 0;
-            case 0x26: return 0;
-            case 0x27: return 5;
-            case 0x28: return 5;
-            case 0x29: return 0;
-            case 0x2A: return 0;
-            case 0x2B: return 0;
-            case 0x2C: return 0;
-            case 0x2D: return 5;
-            case 0x2E: return 4;
-            case 0x2F: return 0;
-            case 0x30: return 0;
-            case 0x31: return 0;
-            case 0x32: return 0;
-
-            case 0x50: return 5;   // change ally options
-            case 0x51: return 9;   // transfer resources
-
-            case 0x60:             // map trigger chat command
-                r.Skip(8);
-                r.ReadCStringRaw();
-                return 0;
-            case 0x61: return 0;   // ESC pressed
-            case 0x62: return 12;  // scenario trigger
-            case 0x66: return 0;   // enter hero skill submenu
-            case 0x67: return 0;   // enter building submenu
-            case 0x68: return 12;  // minimap signal (ping)
-            case 0x69: return 16;  // continue game (block B)
-            case 0x6A: return 16;  // continue game (block A)
-            case 0x75: return 1;   // unknown
-
-            default: return -1;    // 未知 id
-        }
-    }
 }
